@@ -1,4 +1,4 @@
-module gitlab.com/JohnAnthony/banish
+module github.com/humn-ai/banish
 
 go 1.19
 
