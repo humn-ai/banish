@@ -44,6 +44,13 @@ func orgRepos(
 		}
 
 		for _, repo := range repos {
+			if repo.Archived != nil && *repo.Archived {
+				continue
+			}
+			if repo.Disabled != nil && *repo.Disabled {
+				continue
+			}
+
 			out <- *repo
 		}
 
