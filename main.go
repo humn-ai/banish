@@ -22,10 +22,15 @@ type checkRepo struct {
 	goFiles  []*github.TreeEntry
 }
 
+type blacklisted struct {
+	path    string
+	version *version.Version
+}
+
 type issue struct {
 	module      string
 	haveVersion *version.Version
-	minVersion  *version.Version
+	blacklist   blacklisted
 }
 
 func orgRepos(
@@ -127,7 +132,7 @@ func getTreeFile(client *http.Client, treeEntry *github.TreeEntry) ([]byte, erro
 	return body.Content, nil
 }
 
-func issuesInGoMod(data []byte, banish map[string]*version.Version) ([]issue, error) {
+func issuesInGoMod(data []byte, banish []blacklisted) ([]issue, error) {
 	f, err := modfile.ParseLax("", data, nil)
 	if err != nil {
 		return []issue{}, err
@@ -139,23 +144,25 @@ func issuesInGoMod(data []byte, banish map[string]*version.Version) ([]issue, er
 			continue
 		}
 
-		minver, found := banish[req.Mod.Path]
-		if !found {
-			continue
-		}
-		if minver == nil {
-			ret = append(ret, issue{module: req.Mod.Path})
-			continue
-		}
+		for _, bl := range banish {
+			if !atLeastPartialURIMatch(req.Mod.Path, bl.path) {
+				continue
+			}
 
-		have, err := version.NewVersion(req.Mod.Version)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			continue
-		}
+			if bl.version == nil {
+				ret = append(ret, issue{module: req.Mod.Path})
+				continue
+			}
 
-		if have.LessThan(minver) {
-			ret = append(ret, issue{module: req.Mod.Path, haveVersion: have, minVersion: minver})
+			have, err := version.NewVersion(req.Mod.Version)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s\n", err)
+				continue
+			}
+
+			if have.LessThan(bl.version) {
+				ret = append(ret, issue{module: req.Mod.Path, haveVersion: have, blacklist: bl})
+			}
 		}
 	}
 	return ret, nil
@@ -165,7 +172,7 @@ func issuesInGoMod(data []byte, banish map[string]*version.Version) ([]issue, er
 func check(
 	ctx context.Context,
 	client *http.Client,
-	banish map[string]*version.Version,
+	banish []blacklisted,
 	reposToCheck <-chan checkRepo,
 ) bool {
 	var (
@@ -200,7 +207,7 @@ func check(
 			totalModuleIssues += len(issues)
 			red.Printf("FAIL %s %s\n", toCheck.repo.GetFullName(), modFile.GetPath())
 			for _, iss := range issues {
-				if iss.minVersion == nil {
+				if iss.blacklist.version == nil {
 					red.Printf("  MOD IMPORTS %s\n", iss.module)
 					continue
 				}
@@ -208,7 +215,7 @@ func check(
 					"  mod imports %s@%s (min version is %s)\n",
 					iss.module,
 					iss.haveVersion,
-					iss.minVersion,
+					iss.blacklist.version,
 				)
 			}
 		}
@@ -219,6 +226,28 @@ func check(
 		red.Printf("== %d repos had %d banished imports ==\n", reposWithIssue, totalModuleIssues)
 		return false
 	}
+	return true
+}
+
+func atLeastPartialURIMatch(short, long string) bool {
+	// TODO: What a mess! Very inefficient
+	if len(short) > len(long) {
+		return false
+	}
+
+	sParts := strings.Split(short, "/")
+	lParts := strings.Split(long, "/")
+
+	if len(sParts) > len(lParts) {
+		return false
+	}
+
+	for i := 0; i < len(sParts); i++ {
+		if sParts[i] != lParts[i] {
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -277,11 +306,11 @@ func main() {
 	}
 
 	// Note: A `nil` entry means no version was supplied - all versions should be banished
-	banish := make(map[string]*version.Version)
+	var banish []blacklisted
 	for _, modEntry := range strings.Split(cfg.rawModules, ",") {
 		parts := strings.SplitN(modEntry, "@", 2)
 		if len(parts) == 1 {
-			banish[parts[0]] = nil
+			banish = append(banish, blacklisted{path: parts[0]})
 			continue
 		}
 
@@ -290,7 +319,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(3)
 		}
-		banish[parts[0]] = v
+		banish = append(banish, blacklisted{path: parts[0], version: v})
 	}
 
 	// End of config parsing make some clients
