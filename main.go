@@ -17,8 +17,9 @@ import (
 )
 
 type checkRepo struct {
-	repo        github.Repository
-	treeEntries []*github.TreeEntry
+	repo     github.Repository
+	modFiles []*github.TreeEntry
+	goFiles  []*github.TreeEntry
 }
 
 type issue struct {
@@ -63,7 +64,7 @@ func orgRepos(
 	close(out)
 }
 
-func filterForGoMod(
+func filterForGoFiles(
 	ctx context.Context,
 	client *github.Client,
 	org string,
@@ -87,17 +88,21 @@ func filterForGoMod(
 			continue
 		}
 
-		var treeEntries []*github.TreeEntry
+		var modFiles []*github.TreeEntry
+		var goFiles []*github.TreeEntry
 		for _, entry := range tree.Entries {
 			path := entry.GetPath()
 			if path == "go.mod" || strings.HasSuffix(path, "/go.mod") {
 				entry := entry // Capture
-				treeEntries = append(treeEntries, entry)
+				modFiles = append(modFiles, entry)
+			} else if strings.HasSuffix(path, ".go") {
+				entry := entry // Capture
+				goFiles = append(goFiles, entry)
 			}
 		}
 
-		if len(treeEntries) > 0 {
-			out <- checkRepo{repo: repo, treeEntries: treeEntries}
+		if len(modFiles) > 0 {
+			out <- checkRepo{repo: repo, modFiles: modFiles, goFiles: goFiles}
 		}
 	}
 
@@ -173,8 +178,8 @@ func check(
 	// TODO: Handle context closing
 
 	for toCheck := range reposToCheck {
-		for _, treeEntry := range toCheck.treeEntries {
-			mod, err := getTreeFile(client, treeEntry)
+		for _, modFile := range toCheck.modFiles {
+			mod, err := getTreeFile(client, modFile)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
 				continue
@@ -187,13 +192,13 @@ func check(
 			}
 
 			if len(issues) == 0 {
-				green.Printf("PASS %s %s\n", toCheck.repo.GetFullName(), treeEntry.GetPath())
+				green.Printf("PASS %s %s\n", toCheck.repo.GetFullName(), modFile.GetPath())
 				continue
 			}
 
 			reposWithIssue++
 			totalModuleIssues += len(issues)
-			red.Printf("FAIL %s %s\n", toCheck.repo.GetFullName(), treeEntry.GetPath())
+			red.Printf("FAIL %s %s\n", toCheck.repo.GetFullName(), modFile.GetPath())
 			for _, iss := range issues {
 				if iss.minVersion == nil {
 					red.Printf("  MOD IMPORTS %s\n", iss.module)
@@ -303,7 +308,7 @@ func main() {
 	repos := make(chan github.Repository, 10)
 	reposToCheck := make(chan checkRepo, 10)
 	go orgRepos(ctx, gclient, cfg.org, repos)
-	go filterForGoMod(ctx, gclient, cfg.org, cfg.recurse, repos, reposToCheck)
+	go filterForGoFiles(ctx, gclient, cfg.org, cfg.recurse, repos, reposToCheck)
 	if !check(ctx, oclient, banish, reposToCheck) {
 		os.Exit(2)
 	}
