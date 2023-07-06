@@ -9,7 +9,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/google/go-github/v53/github"
 	version "github.com/hashicorp/go-version"
 	"golang.org/x/mod/modfile"
@@ -178,8 +177,7 @@ func check(
 	var (
 		reposWithIssue    int
 		totalModuleIssues int
-		red               = color.New(color.FgRed)
-		green             = color.New(color.FgGreen)
+		write             = newWriter()
 	)
 
 	// TODO: Handle context closing
@@ -199,31 +197,21 @@ func check(
 			}
 
 			if len(issues) == 0 {
-				green.Printf("PASS %s %s\n", toCheck.repo.GetFullName(), modFile.GetPath())
+				write.Pass(toCheck.repo.GetFullName(), modFile.GetPath())
 				continue
 			}
 
 			reposWithIssue++
 			totalModuleIssues += len(issues)
-			red.Printf("FAIL %s %s\n", toCheck.repo.GetFullName(), modFile.GetPath())
+			write.Fail(toCheck.repo.GetFullName(), modFile.GetPath())
 			for _, iss := range issues {
-				if iss.blacklist.version == nil {
-					red.Printf("  MOD IMPORTS %s\n", iss.module)
-					continue
-				}
-				red.Printf(
-					"  mod imports %s@%s (min version is %s)\n",
-					iss.module,
-					iss.haveVersion,
-					iss.blacklist.version,
-				)
+				write.Issue(iss.module, iss.haveVersion, iss.blacklist.version)
 			}
 		}
 	}
 
 	if reposWithIssue != 0 {
-		red.Println()
-		red.Printf("== %d repos had %d banished imports ==\n", reposWithIssue, totalModuleIssues)
+		write.Summary(reposWithIssue, totalModuleIssues)
 		return false
 	}
 	return true
