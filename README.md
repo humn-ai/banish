@@ -52,7 +52,7 @@ When maintaining lots of repos, it is often necessary to find a list of repos co
 
 Here's why:
 * You have updated a module with a breaking change, and want to ensure that all projects that depend upon it have been updated
-* You have identified a security, license, or some other issue with a dependency and with to make sure that none of your repos depend upon it (including at least one step indirectly)
+* You have identified a security, license, or some other issue with a dependency and wish to make sure that none of your repos depend upon it (including at least one step indirectly)
 * You have tried to use GitHub's search to help find these issues and value your sanity enough to use some proper tooling instead :smile:
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
